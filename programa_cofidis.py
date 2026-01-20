@@ -134,7 +134,6 @@ if os.path.exists(csv_carreras):
         
         st.divider()
         if isinstance(resultado, (float, int, np.float64)):
-            st.metric(label=f"Nivel de la prueba: {carrera_seleccionada}", value=f"{resultado} / 10")
-            st.info(f"Escala basada solo en vuestras carreras. (Min: {st.session_state.get('extremo_min')} | Max: {st.session_state.get('extremo_max')})")
+            st.metric(label=f"Nivel para obetener puntos: {carrera_seleccionada}", value=f"{resultado} / 10")
         else:
             st.info(resultado)
