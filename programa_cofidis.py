@@ -7,7 +7,7 @@ import numpy as np
 st.set_page_config(page_title="Cofidis Racing Analytics", page_icon="🚴")
 
 st.title("🚴 Análisis de Dificultad - Cofidis")
-st.markdown("Esta herramienta calcula la dificultad ponderada basada en el ranking de los ganadores de 2025.")
+st.markdown("Cálculo de competitividad real basado en el histórico de ganadores 2025.")
 
 def seleccionar_carrera_web(path_csv):
     try:
@@ -32,6 +32,7 @@ class Cofidis:
         self.output_final_path = 'data/calendario_uci_2025_con_notas.csv'
 
     def csv_nota_cofidis(self):
+        """Genera notas base comparando a todo el mundo con el rango de Cofidis."""
         if not os.path.exists(self.ranking_path): return None
         df = pd.read_csv(self.ranking_path, sep=None, engine='python')
         df.columns = df.columns.str.strip()
@@ -57,75 +58,83 @@ class Cofidis:
         return df
 
     def añadir_nota_a_ganadores(self):
-        if not os.path.exists(self.output_path): return None
+        """Recalibra la escala ignorando carreras sin datos o con nota 0."""
+        if not os.path.exists(self.output_path) or not os.path.exists(self.calendario_2025_path):
+            return None
+
         df_ranking = pd.read_csv(self.output_path)
         df_2025 = pd.read_csv(self.calendario_2025_path)
         df_2025.columns = df_2025.columns.str.strip()
         
         df_final = pd.merge(df_2025, df_ranking[['Rider', 'nota']], 
                            left_on='Winner', right_on='Rider', how='left')
-        
-        # --- NUEVA LÓGICA: RE-CALIBRACIÓN (Normalización Min-Max) ---
-        # Cogemos todas las notas de los ganadores que NO sean nulas
-        notas_validas = df_final['nota'].dropna()
-        if not notas_validas.empty:
-            n_min = notas_validas.min()
-            n_max = notas_validas.max()
-            rango_n = n_max - n_min
+
+        # --- FILTRO CRÍTICO ---
+        # Solo usamos para el cálculo de Max/Min las carreras que tengan nota > 0
+        carreras_validas = df_final[df_final['nota'] > 0].copy()
+
+        if not carreras_validas.empty:
+            n_min = carreras_validas['nota'].min()
+            n_max = carreras_validas['nota'].max()
+            rango_reales = n_max - n_min
             
-            if rango_n > 0:
-                # Aplicamos la fórmula para que el peor ganador sea 0 y el mejor 10
-                df_final['nota_recalibrada'] = ((df_final['nota'] - n_min) / rango_n) * 10
-                df_final['nota_recalibrada'] = df_final['nota_recalibrada'].round(2)
-            else:
-                df_final['nota_recalibrada'] = 10.0
-        
+            def recalibrar(valor):
+                # Si no hay nota o es 0, no entra en la escala (queda nulo)
+                if pd.isna(valor) or valor <= 0:
+                    return np.nan 
+                
+                if rango_reales > 0:
+                    nueva_nota = ((valor - n_min) / rango_reales) * 10
+                    return round(nueva_nota, 2)
+                return 10.0 # Caso donde todos los ganadores tengan la misma nota
+
+            df_final['nota_recalibrada'] = df_final['nota'].apply(recalibrar)
+        else:
+            df_final['nota_recalibrada'] = np.nan
+
         if 'Rider' in df_final.columns: df_final = df_final.drop(columns=['Rider'])
         df_final.to_csv(self.output_final_path, index=False)
         return df_final
 
     def obtener_nota_carrera(self):
-        if not os.path.exists(self.output_final_path): return "Error de datos"
+        if not os.path.exists(self.output_final_path): return "Error de base de datos"
         df = pd.read_csv(self.output_final_path)
         col_busqueda = 'Race' if 'Race' in df.columns else 'Name'
         
         termino = self.carrera.strip().lower()
         coincidencias = df[df[col_busqueda].str.strip().str.lower().str.contains(termino, na=False)]
         
-        if coincidencias.empty: return "Carrera no encontrada"
+        if coincidencias.empty: return "Carrera no encontrada en el histórico"
         
-        # Buscamos la nota recalibrada
+        # Cogemos la nota recalibrada más alta de las coincidencias
         con_nota = coincidencias.dropna(subset=['nota_recalibrada'])
         if not con_nota.empty:
             return con_nota.sort_values(by='nota_recalibrada', ascending=False)['nota_recalibrada'].values[0]
-        return "Ganador no rankeado"
+        
+        return "Sin datos suficientes (Ganador fuera de ranking)"
 
-# --- EJECUCIÓN ---
+# --- LÓGICA DE STREAMLIT ---
 csv_carreras = 'data/upcoming_races_cofidis.csv'
 if not os.path.exists('data'): os.makedirs('data')
 
 if os.path.exists(csv_carreras):
     carrera_seleccionada = seleccionar_carrera_web(csv_carreras)
 
-    if st.button("🚀 Calcular Nota de Dificultad"):
-        app = Cofidis(carrera_seleccionada)
-        with st.spinner('Analizando competitividad...'):
-            app.csv_nota_cofidis()
-            app.añadir_nota_a_ganadores()
-            resultado = app.obtener_nota_carrera()
-        
-        st.divider()
-        if isinstance(resultado, (int, float, np.float64)):
-            st.metric(label=f"Dificultad Re-escalada para {carrera_seleccionada}", value=f"{resultado} / 10")
+    if st.button("🚀 Calcular Dificultad"):
+        if carrera_seleccionada:
+            app = Cofidis(carrera_seleccionada)
+            with st.spinner('Filtrando datos nulos y ajustando escala...'):
+                app.csv_nota_cofidis()
+                app.añadir_nota_a_ganadores()
+                resultado = app.obtener_nota_carrera()
             
-            # Gráfico de contexto para el usuario
-            st.info(f"Nota original estirada: El ganador más débil de 2025 ahora marca el 0 y el mejor el 10.")
-            
-            if resultado > 7.5:
-                st.error("Nivel Top: Los mejores del mundo ganan aquí.")
-            elif resultado > 4:
-                st.warning("Nivel Pro: Competencia muy equilibrada.")
+            st.divider()
+            if isinstance(resultado, (float, int, np.float64)):
+                st.metric(label=f"Nivel de la prueba: {carrera_seleccionada}", value=f"{resultado} / 10")
+                st.caption("Nota ajustada omitiendo carreras sin información UCI.")
+                
+                if resultado > 8: st.error("Dificultad Extrema")
+                elif resultado > 5: st.warning("Dificultad Alta")
+                else: st.success("Oportunidad de victoria")
             else:
-                st.success("Oportunidad: Nivel por debajo de la media de ganadores UCI.")
-        else:
-            st.info(resultado)
+                st.info(resultado)
