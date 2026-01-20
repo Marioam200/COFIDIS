@@ -41,23 +41,31 @@ class Cofidis:
         if not os.path.exists(self.ranking_path):
             st.error(f"No existe el archivo {self.ranking_path}")
             return None
-
-        df = pd.read_csv(self.ranking_path)
+        
+        df = pd.read_csv(self.ranking_path, sep=None, engine='python')
+        
         df.columns = df.columns.str.strip()
 
-        # 1. Filtrar corredores de Cofidis
-        cofidis = df[df['team'] == 'Cofidis']
+        col_equipo = None
+        if 'Team' in df.columns:
+            col_equipo = 'Team'
+        elif 'team' in df.columns:
+            col_equipo = 'team'
         
-        if cofidis.empty:
-            st.warning("No se encontraron corredores de Cofidis en el ranking.")
+        if not col_equipo:
+            st.error(f"❌ No se encuentra la columna 'Team'. Columnas actuales: {list(df.columns)}")
             return None
 
-        # Límites del equipo
+        cofidis = df[df[col_equipo].str.strip() == 'Cofidis']
+        
+        if cofidis.empty:
+            st.warning("⚠️ No se encontraron corredores de 'Cofidis'. Revisa que el nombre en el CSV sea exacto.")
+            return None
+
         idx_mejor_cofidis = cofidis.index.min()
         idx_peor_cofidis = cofidis.index.max()
         rango = idx_peor_cofidis - idx_mejor_cofidis
 
-        # 2. Función interna de asignación
         def asignar_nota(current_idx):
             if current_idx < idx_mejor_cofidis:
                 return 10.0
@@ -66,13 +74,13 @@ class Cofidis:
             if rango == 0: 
                 return 10.0
             
-            # Interpolación lineal de 10 a 0
             nota = 10 * (1 - (current_idx - idx_mejor_cofidis) / rango)
             return round(nota, 2)
 
-        # 3. Aplicar y guardar
-        df['nota'] = df.index.map(asignar_nota)
+        df['nota'] = [asignar_nota(i) for i in range(len(df))]
+        
         df.to_csv(self.output_path, index=False)
+        st.success("✅ Ranking actualizado con éxito usando la columna 'Team'.")
         return df
 
     def añadir_nota_a_ganadores(self):
