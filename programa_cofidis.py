@@ -80,7 +80,6 @@ class Cofidis:
         df['nota'] = [asignar_nota(i) for i in range(len(df))]
         
         df.to_csv(self.output_path, index=False)
-        st.success("✅ Ranking actualizado con éxito usando la columna 'Team'.")
         return df
 
     def añadir_nota_a_ganadores(self):
