@@ -7,23 +7,18 @@ import numpy as np
 st.set_page_config(page_title="Cofidis Racing Analytics", page_icon="🚴")
 
 st.title("🚴 Análisis de Dificultad - Cofidis")
-st.markdown("Esta herramienta calcula la dificultad de una carrera basada en el ranking UCI del ganador del año anterior.")
+st.markdown("Esta herramienta calcula la dificultad ponderada basada en el ranking de los ganadores de 2025.")
 
 def seleccionar_carrera_web(path_csv):
-    """Interfaz web para seleccionar la carrera desde el CSV."""
     try:
-        # Detecta automáticamente el separador
         df = pd.read_csv(path_csv, sep=None, engine='python')
         df.columns = df.columns.str.strip()
-        
         if 'Name' not in df.columns:
             st.error(f"No se encontró la columna 'Name' en {path_csv}")
             return None
-            
         opciones = sorted(df['Name'].unique().tolist())
         seleccion = st.selectbox("Selecciona la próxima carrera Cofidis 2026:", opciones)
         return seleccion
-        
     except Exception as e:
         st.error(f"❌ Error al cargar el archivo de carreras: {e}")
         return None
@@ -37,135 +32,100 @@ class Cofidis:
         self.output_final_path = 'data/calendario_uci_2025_con_notas.csv'
 
     def csv_nota_cofidis(self):
-        """Genera notas basadas en el desempeño relativo a Cofidis."""
-        if not os.path.exists(self.ranking_path):
-            st.error(f"No existe el archivo {self.ranking_path}")
-            return None
-        
+        if not os.path.exists(self.ranking_path): return None
         df = pd.read_csv(self.ranking_path, sep=None, engine='python')
-        
         df.columns = df.columns.str.strip()
 
-        col_equipo = None
-        if 'Team' in df.columns:
-            col_equipo = 'Team'
-        elif 'team' in df.columns:
-            col_equipo = 'team'
-        
-        if not col_equipo:
-            st.error(f"❌ No se encuentra la columna 'Team'. Columnas actuales: {list(df.columns)}")
-            return None
-
+        col_equipo = 'Team' if 'Team' in df.columns else 'team'
         cofidis = df[df[col_equipo].str.strip() == 'Cofidis']
         
-        if cofidis.empty:
-            st.warning("⚠️ No se encontraron corredores de 'Cofidis'. Revisa que el nombre en el CSV sea exacto.")
-            return None
+        if cofidis.empty: return None
 
-        idx_mejor_cofidis = cofidis.index.min()
-        idx_peor_cofidis = cofidis.index.max()
-        rango = idx_peor_cofidis - idx_mejor_cofidis
+        idx_mejor = cofidis.index.min()
+        idx_peor = cofidis.index.max()
+        rango = idx_peor - idx_mejor
 
         def asignar_nota(current_idx):
-            if current_idx < idx_mejor_cofidis:
-                return 10.0
-            if current_idx > idx_peor_cofidis:
-                return 0.0
-            if rango == 0: 
-                return 10.0
-            
-            nota = 10 * (1 - (current_idx - idx_mejor_cofidis) / rango)
+            if current_idx < idx_mejor: return 10.0
+            if current_idx > idx_peor: return 0.0
+            if rango == 0: return 10.0
+            nota = 10 * (1 - (current_idx - idx_mejor) / rango)
             return round(nota, 2)
 
         df['nota'] = [asignar_nota(i) for i in range(len(df))]
-        
         df.to_csv(self.output_path, index=False)
         return df
 
     def añadir_nota_a_ganadores(self):
-        """Cruza el calendario 2025 con las notas generadas."""
-        if not os.path.exists(self.output_path) or not os.path.exists(self.calendario_2025_path):
-            return None
-
+        if not os.path.exists(self.output_path): return None
         df_ranking = pd.read_csv(self.output_path)
         df_2025 = pd.read_csv(self.calendario_2025_path)
-        
         df_2025.columns = df_2025.columns.str.strip()
-        df_ranking.columns = df_ranking.columns.str.strip()
-
-        # Unimos por el nombre del ganador (Winner) y el corredor del ranking (Rider)
-        df_final = pd.merge(
-            df_2025, 
-            df_ranking[['Rider', 'nota']], 
-            left_on='Winner',  
-            right_on='Rider', 
-            how='left'
-        )
-
-        if 'Rider' in df_final.columns:
-            df_final = df_final.drop(columns=['Rider'])
-
+        
+        df_final = pd.merge(df_2025, df_ranking[['Rider', 'nota']], 
+                           left_on='Winner', right_on='Rider', how='left')
+        
+        # --- NUEVA LÓGICA: RE-CALIBRACIÓN (Normalización Min-Max) ---
+        # Cogemos todas las notas de los ganadores que NO sean nulas
+        notas_validas = df_final['nota'].dropna()
+        if not notas_validas.empty:
+            n_min = notas_validas.min()
+            n_max = notas_validas.max()
+            rango_n = n_max - n_min
+            
+            if rango_n > 0:
+                # Aplicamos la fórmula para que el peor ganador sea 0 y el mejor 10
+                df_final['nota_recalibrada'] = ((df_final['nota'] - n_min) / rango_n) * 10
+                df_final['nota_recalibrada'] = df_final['nota_recalibrada'].round(2)
+            else:
+                df_final['nota_recalibrada'] = 10.0
+        
+        if 'Rider' in df_final.columns: df_final = df_final.drop(columns=['Rider'])
         df_final.to_csv(self.output_final_path, index=False)
         return df_final
 
     def obtener_nota_carrera(self):
-        """Busca la nota final en el archivo procesado."""
-        if not os.path.exists(self.output_final_path):
-            return "Archivo de resultados no generado."
-
+        if not os.path.exists(self.output_final_path): return "Error de datos"
         df = pd.read_csv(self.output_final_path)
         col_busqueda = 'Race' if 'Race' in df.columns else 'Name'
-
-        termino_busqueda = self.carrera.strip().lower()
-        coincidencias = df[df[col_busqueda].str.strip().str.lower().str.contains(termino_busqueda, na=False)]
         
-        if coincidencias.empty:
-            return "Carrera no encontrada en el histórico 2025."
-            
-        con_nota = coincidencias.dropna(subset=['nota'])
+        termino = self.carrera.strip().lower()
+        coincidencias = df[df[col_busqueda].str.strip().str.lower().str.contains(termino, na=False)]
         
+        if coincidencias.empty: return "Carrera no encontrada"
+        
+        # Buscamos la nota recalibrada
+        con_nota = coincidencias.dropna(subset=['nota_recalibrada'])
         if not con_nota.empty:
-            # Seleccionamos la nota más alta si hay varias versiones de la carrera
-            nota = con_nota.sort_values(by='nota', ascending=False)['nota'].values[0]
-            return nota
-        else:
-            return "Carrera encontrada, pero el ganador no está en el ranking UCI (sin nota)."
+            return con_nota.sort_values(by='nota_recalibrada', ascending=False)['nota_recalibrada'].values[0]
+        return "Ganador no rankeado"
 
-# --- EJECUCIÓN PRINCIPAL ---
+# --- EJECUCIÓN ---
 csv_carreras = 'data/upcoming_races_cofidis.csv'
-
-# Asegurar que la carpeta data existe
-if not os.path.exists('data'):
-    os.makedirs('data')
+if not os.path.exists('data'): os.makedirs('data')
 
 if os.path.exists(csv_carreras):
     carrera_seleccionada = seleccionar_carrera_web(csv_carreras)
 
     if st.button("🚀 Calcular Nota de Dificultad"):
-        if carrera_seleccionada:
-            app = Cofidis(carrera_seleccionada)
+        app = Cofidis(carrera_seleccionada)
+        with st.spinner('Analizando competitividad...'):
+            app.csv_nota_cofidis()
+            app.añadir_nota_a_ganadores()
+            resultado = app.obtener_nota_carrera()
+        
+        st.divider()
+        if isinstance(resultado, (int, float, np.float64)):
+            st.metric(label=f"Dificultad Re-escalada para {carrera_seleccionada}", value=f"{resultado} / 10")
             
-            with st.spinner('Procesando ranking y calendario...'):
-                app.csv_nota_cofidis()
-                app.añadir_nota_a_ganadores()
-                resultado_nota = app.obtener_nota_carrera()
+            # Gráfico de contexto para el usuario
+            st.info(f"Nota original estirada: El ganador más débil de 2025 ahora marca el 0 y el mejor el 10.")
             
-            st.divider()
-            st.subheader(f"Carrera: {carrera_seleccionada}")
-            
-            if isinstance(resultado_nota, (int, float, np.float64)):
-                st.metric(label="Nota de Dificultad (Benchmark Cofidis)", value=f"{resultado_nota} / 10")
-                
-                # Feedback visual según la nota
-                if resultado_nota > 8:
-                    st.error("🔥 **Nivel Muy Alto:** Participación de élite mundial.")
-                elif resultado_nota > 5:
-                    st.warning("📈 **Nivel Medio:** Competencia exigente.")
-                else:
-                    st.success("🚴 **Nivel Accesible:** Gran oportunidad para el equipo.")
+            if resultado > 7.5:
+                st.error("Nivel Top: Los mejores del mundo ganan aquí.")
+            elif resultado > 4:
+                st.warning("Nivel Pro: Competencia muy equilibrada.")
             else:
-                st.info(resultado_nota)
+                st.success("Oportunidad: Nivel por debajo de la media de ganadores UCI.")
         else:
-            st.warning("Por favor, selecciona una carrera primero.")
-else:
-    st.error(f"Archivo no encontrado: {csv_carreras}. Verifica la carpeta 'data'.")
+            st.info(resultado)
