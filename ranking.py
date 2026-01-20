@@ -8,8 +8,7 @@ import time
 import os
 
 class ProCyclingStatsScraper:
-    def __init__(self, team_name: str):
-        self.team_name = team_name
+    def __init__(self):
         options = webdriver.ChromeOptions()
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -95,7 +94,7 @@ class ProCyclingStatsScraper:
         self.driver.quit()
 
 if __name__ == "__main__":
-    scraper = ProCyclingStatsScraper(team_name="General")
+    scraper = ProCyclingStatsScraper()
     try:
         scraper.accept_cookies()
         scraper.extract_full_ranking("PCS_Ranking_Completo.csv")

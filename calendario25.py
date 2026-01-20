@@ -8,8 +8,7 @@ import time
 import os
 
 class ProCyclingStatsScraper:
-    def __init__(self, team_name: str):
-        self.team_name = team_name
+    def __init__(self):
         options = webdriver.ChromeOptions()
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -47,40 +46,29 @@ class ProCyclingStatsScraper:
             self.resolver_captcha()
 
     def search_C25(self):
-        """
-        Selecciona el año 2025 y el circuito 'All' para obtener el calendario completo.
-        """
-        print("🔍 Configurando filtros para el calendario 2025...")
         self.driver.get(self.base_url + "races.php")
         
         try:
-            # 1. Esperar y seleccionar AÑO 2025
             self.wait.until(EC.presence_of_element_located((By.NAME, "year")))
             select_year = Select(self.driver.find_element(By.NAME, "year"))
             select_year.select_by_value("2025")
             
-            # 2. Esperar y seleccionar CIRCUITO (Vacío = All)
             self.wait.until(EC.presence_of_element_located((By.NAME, "circuit")))
             select_circuit = Select(self.driver.find_element(By.NAME, "circuit"))
             select_circuit.select_by_value("") # El valor "" corresponde a '-' (Todos)
             
-            # 3. Pulsar botón Filter
             boton_filter = self.wait.until(EC.element_to_be_clickable((By.NAME, "filter")))
             boton_filter.click()
             
-            # Espera a que la URL cambie o la tabla se refresque
             time.sleep(5) 
-            print("✅ Filtros aplicados correctamente.")
             
         except Exception as e:
             print(f"❌ Error al aplicar filtros: {e}")
 
     def extract_calendar_to_csv(self, file_name="calendario_uci_2025.csv"):
-        print("📊 Extrayendo tabla de carreras...")
         path_final = os.path.join('data', file_name)
         
         try:
-            # Esperar a que la tabla aparezca después del filtrado
             self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table.basic")))
             
             soup = BeautifulSoup(self.driver.page_source, 'html.parser')
@@ -94,7 +82,7 @@ class ProCyclingStatsScraper:
             rows = table_body.find_all('tr')
             for row in rows:
                 cols = row.find_all('td')
-                # Filtramos filas que no son de carreras (algunas filas son separadores de meses)
+
                 if len(cols) >= 5:
                     data.append({
                         'Date': cols[0].get_text(strip=True),
@@ -105,18 +93,18 @@ class ProCyclingStatsScraper:
             
             df = pd.DataFrame(data)
             df.to_csv(path_final, index=False, encoding='utf-8-sig')
-            print(f"✅ Calendario exportado con {len(df)} carreras: {path_final}")
+            print(f" Calendario exportado con {len(df)} carreras: {path_final}")
             return df
 
         except Exception as e:
-            print(f"❌ Error extrayendo la tabla: {e}")
+            print(f" Error extrayendo la tabla: {e}")
             return None
 
     def close(self):
         self.driver.quit()
 
 if __name__ == "__main__":
-    scraper = ProCyclingStatsScraper("General") 
+    scraper = ProCyclingStatsScraper() 
     try:
         scraper.accept_cookies()
         scraper.search_C25()
