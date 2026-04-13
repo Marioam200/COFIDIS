@@ -24,6 +24,7 @@ This project automatically scrapes the UCI rider rankings and race calendar from
 
 ## Project Structure
 
+```
 TRABAJO_MDP/
 ├── app.py                              # Main Streamlit interface
 ├── scraper_calendario.py               # UCI 2025 calendar scraper
@@ -35,9 +36,7 @@ TRABAJO_MDP/
 │   ├── PCS_Ranking_Con_Nota.csv            # Ranking with scores (generated)
 │   └── calendario_uci_2025_con_notas.csv   # Final output with scores
 └── requirements.txt
-
-Text
-
+```
 ---
 
 ##  Installation
